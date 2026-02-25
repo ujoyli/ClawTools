@@ -6,7 +6,7 @@ _Learn about the person you're helping. Update this as you go._
 - **What to call them:** 大帅
 - **Pronouns:** _(optional)_
 - **Timezone:** UTC
-- **Notes:**
+- **Notes:** 希望助手是“全能助手”，风格偏温柔。
 
 ## Context
 
