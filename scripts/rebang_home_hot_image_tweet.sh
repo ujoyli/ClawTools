@@ -132,8 +132,9 @@ USE_IMG="$IMG_POSTER"
 export IMG_ORIG
 
 python - <<'PY' > /tmp/rebang_img_path.txt
-import os, re, httpx
+import os, re, io, math
 from urllib.parse import urljoin
+import httpx
 
 url=os.environ['URL'].strip()
 out=os.environ['IMG_ORIG']
@@ -142,8 +143,33 @@ headers={
   'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36',
 }
 
-c=httpx.Client(follow_redirects=True, headers=headers, timeout=20)
+# Validate image to avoid 1x1 / solid-color placeholders.
+def looks_ok(img_bytes: bytes) -> bool:
+    if not img_bytes or len(img_bytes) < 15_000:
+        return False
+    try:
+        from PIL import Image
+        im = Image.open(io.BytesIO(img_bytes))
+        im = im.convert('RGB')
+        w,h = im.size
+        if w < 500 or h < 280:
+            return False
+        # sample grayscale stddev
+        import random
+        samples=[]
+        for _ in range(2500):
+            x=random.randrange(w)
+            y=random.randrange(h)
+            r,g,b=im.getpixel((x,y))
+            samples.append((r+g+b)/3)
+        mean=sum(samples)/len(samples)
+        var=sum((v-mean)**2 for v in samples)/len(samples)
+        std=math.sqrt(var)
+        return std >= 18.0
+    except Exception:
+        return False
 
+c=httpx.Client(follow_redirects=True, headers=headers, timeout=20)
 img_url=None
 try:
     r=c.get(url)
@@ -167,7 +193,7 @@ try:
         img_url=urljoin(url, img_url)
         ir=c.get(img_url)
         ir.raise_for_status()
-        if len(ir.content) > 10_000:
+        if looks_ok(ir.content):
             os.makedirs(os.path.dirname(out), exist_ok=True)
             with open(out,'wb') as f:
                 f.write(ir.content)
