@@ -18,8 +18,8 @@ def to_bool_flag(v: bool) -> str:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--in", dest="in_path", required=True, help="Path to cookie JSON export")
-    ap.add_argument("--out", dest="out_path", required=True, help="Output cookies.txt path")
+    ap.add_argument("--in", dest="in_path", default="/root/bilibili_cookies.json", help="Path to cookie JSON export (default: /root/bilibili_cookies.json)")
+    ap.add_argument("--out", dest="out_path", default="/root/.openclaw/workspace/tmp/bili/bilibili_cookies.txt", help="Output cookies.txt path (default: workspace tmp)")
     args = ap.parse_args()
 
     with open(args.in_path, "r", encoding="utf-8") as f:

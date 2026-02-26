@@ -7,10 +7,13 @@ description: Download Bilibili videos on a server using a local exported cookie 
 
 Use this skill when yt-dlp fails on Bilibili with HTTP 412 on server IPs. The fix is to use the user's **local** exported cookie JSON to authenticate.
 
-## Inputs (ask user for paths; do not ask them to paste cookies)
+## Inputs
 
-- Cookie JSON path (Cookie-Editor export JSON array), e.g. `~/bilibili_cookies.json`
 - Bilibili URL, e.g. `https://www.bilibili.com/video/BV.../`
+
+Cookie path is **defaulted** to `/root/bilibili_cookies.json` (Cookie-Editor export JSON array).
+- If the file is missing/expired, ask the user to update `/root/bilibili_cookies.json` on the machine.
+- Do not ask the user to paste cookies into chat.
 
 ## Quick commands
 
