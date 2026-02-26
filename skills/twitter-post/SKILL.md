@@ -63,6 +63,7 @@ All commands via `exec`.
 
 Scripts (relative to this skill directory):
 - `scripts/tweet.js` — text tweets (single/reply/quote/thread)
+- `scripts/image_post.js` — upload an image and post a tweet with media
 - `scripts/video_post.js` — upload a video and post a tweet with media
 
 ### Load env vars (recommended)
@@ -101,6 +102,12 @@ node scripts/tweet.js --quote 1234567890 "Your commentary"
 node scripts/tweet.js --thread "First tweet" "Second tweet" "Third tweet"
 ```
 
+### Tweet with image
+
+```bash
+node scripts/image_post.js /absolute/path/to/image.png "Your tweet text here"
+```
+
 ### Tweet with video
 
 ```bash
@@ -108,7 +115,7 @@ node scripts/video_post.js /absolute/path/to/video.mp4 "Your tweet text here"
 ```
 
 Notes:
-- Video upload uses chunked upload via Twitter API v1.1 under the hood, then posts the tweet via v2.
+- Media upload uses Twitter API v1.1 under the hood, then posts the tweet via v2.
 - Prefer an absolute file path.
 - If upload fails, check file size/duration and that your app/user has the right permissions.
 
