@@ -33,7 +33,8 @@ for i,it in enumerate(q.get('queue',[])):
         print(i)
         raise SystemExit
 print('')
-PY)
+PY
+)
 
 if [[ -z "$NEXT" ]]; then
   echo "No pending items" >&2
@@ -41,17 +42,8 @@ if [[ -z "$NEXT" ]]; then
 fi
 
 # Extract url/title
-read -r URL TITLE <<EOF
-$(python3 - <<'PY'
-import json
-p='/root/.openclaw/workspace/data/douyin_video_queue.json'
-q=json.load(open(p,'r',encoding='utf-8'))
-it=q['queue'][int(open(0).read().strip() or 0)]
-print(it.get('url',''))
-print(it.get('title','').replace('\n',' ').strip())
-PY
-<<<"$NEXT")
-EOF
+URL=$(python3 -c "import json; q=json.load(open('$QUEUE_JSON','r',encoding='utf-8')); print(q['queue'][int('$NEXT')].get('url',''))")
+TITLE=$(python3 -c "import json; q=json.load(open('$QUEUE_JSON','r',encoding='utf-8')); print((q['queue'][int('$NEXT')].get('title','') or '').replace('\\n',' ').strip())")
 
 if [[ -z "${URL:-}" ]]; then
   echo "Queue item missing url" >&2
@@ -84,27 +76,28 @@ fi
 
 # Compose a punchy caption (keep it short)
 CAPTION=$(python3 - <<'PY'
-import os, textwrap
-url=os.environ.get('URL','')
+import os
 title=os.environ.get('TITLE','').strip()
-# simple templates
 hook='这条信息量有点大，建议看完再下结论。'
-# trim title
 if len(title)>60:
     title=title[:60]+'…'
 print(f"{hook}\n{title}\n#抖音 #热点")
-PY)
+PY
+)
 
 # Post video
 RESP=$(node "$VIDEO_POST_JS" "$AFTER" "$CAPTION")
 
 echo "$RESP"
 
-TWEET_URL=$(python3 - <<'PY'
+TWEET_URL=$(python3 - <<'PY' <<<"$RESP"
 import json,sys
-obj=json.loads(sys.stdin.read())
+obj=json.loads(sys.stdin.read() or '{}')
 print(obj.get('url') or '')
-PY <<<"$RESP")
+PY
+)
+
+export IDX="$NEXT" TWEET_URL
 
 if [[ -z "$TWEET_URL" ]]; then
   echo "Tweet failed: $RESP" >&2
@@ -113,12 +106,16 @@ fi
 
 # Mark queue item as posted
 python3 - <<'PY'
-import json,datetime
+import json,datetime,os
 p='/root/.openclaw/workspace/data/douyin_video_queue.json'
 q=json.load(open(p,'r',encoding='utf-8'))
-idx=int(open(0).read().strip())
+idx=int(os.environ['IDX'])
+tweet_url=os.environ['TWEET_URL'].strip()
 q['queue'][idx]['status']='posted'
-q['queue'][idx]['tweet_url']=open('/dev/stdin').read().strip()
+q['queue'][idx]['tweet_url']=tweet_url
 q['queue'][idx]['posted_at']=datetime.datetime.now().isoformat()
-json.dump(q, open(p,'w',encoding='utf-8'), ensure_ascii=False, indent=2)
-PY <<<"$NEXT" <<<"$TWEET_URL"
+with open(p,'w',encoding='utf-8') as f:
+    json.dump(q, f, ensure_ascii=False, indent=2)
+    f.write('\n')
+PY
+

@@ -98,7 +98,7 @@ def main():
     const found = out.find(o => o.href === href);
     if (found) ordered.push(found);
   });
-  return ordered.slice(0, 30);
+  return ordered.slice(0, 80);
 }"""
 
         res = bw_post(
@@ -120,7 +120,7 @@ def main():
         if not url or not title:
             continue
         candidates.append({"rank": len(candidates) + 1, "title": title, "url": url})
-        if len(candidates) >= 12:
+        if len(candidates) >= 30:
             break
 
     payload = {"generated_at": datetime.now().isoformat(), "source": "rebang.today/douyin", "candidates": candidates}
