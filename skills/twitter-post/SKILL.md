@@ -24,7 +24,25 @@ Optional:
 
 ## Setup
 
-Store credentials as env vars. Recommended: add to the OpenClaw instance config or export in shell profile. **Never hardcode keys in SKILL.md or scripts.**
+Store credentials as env vars. Recommended: add to the OpenClaw instance config, a locked-down env file, or export in shell profile.
+
+**Never hardcode keys in SKILL.md or scripts. Never echo keys back into chat.**
+
+### Suggested env file location
+
+A practical pattern is to keep credentials at:
+- `/root/.config/x-twitter/.env`
+
+with permissions like `600`.
+
+Expected keys inside:
+- `TWITTER_CONSUMER_KEY`
+- `TWITTER_CONSUMER_SECRET`
+- `TWITTER_ACCESS_TOKEN`
+- `TWITTER_ACCESS_TOKEN_SECRET`
+
+Optional:
+- `TWITTER_BEARER_TOKEN` (not required for posting with OAuth 1.0a)
 
 If the user hasn't set up OAuth yet, guide them:
 
@@ -41,7 +59,23 @@ If the user hasn't set up OAuth yet, guide them:
 
 ## Usage
 
-All commands via `exec`. Script path: `scripts/tweet.js` (relative to this skill directory).
+All commands via `exec`.
+
+Scripts (relative to this skill directory):
+- `scripts/tweet.js` — text tweets (single/reply/quote/thread)
+- `scripts/video_post.js` — upload a video and post a tweet with media
+
+### Load env vars (recommended)
+
+If secrets are stored in an env file (example: `/root/.config/x-twitter/.env`), load them **without printing**:
+
+```bash
+set -a
+source /root/.config/x-twitter/.env
+set +a
+```
+
+Then run the scripts normally.
 
 ### Single tweet
 
@@ -66,6 +100,17 @@ node scripts/tweet.js --quote 1234567890 "Your commentary"
 ```bash
 node scripts/tweet.js --thread "First tweet" "Second tweet" "Third tweet"
 ```
+
+### Tweet with video
+
+```bash
+node scripts/video_post.js /absolute/path/to/video.mp4 "Your tweet text here"
+```
+
+Notes:
+- Video upload uses chunked upload via Twitter API v1.1 under the hood, then posts the tweet via v2.
+- Prefer an absolute file path.
+- If upload fails, check file size/duration and that your app/user has the right permissions.
 
 ### Output
 
