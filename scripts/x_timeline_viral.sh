@@ -32,7 +32,7 @@ const puppeteer=require("puppeteer-core"),fs=require("fs");
 
   const tweets=await page.evaluate(()=>{
     return[...document.querySelectorAll("article[data-testid=\"tweet\"]")].slice(0,30).map(a=>{
-      const text=(a.querySelector("[data-testid=\"tweetText\"]")?.textContent||"").substring(0,500);
+      const text=(a.querySelector("[data-testid=\"tweetText\"]")?.textContent||"");
       const time=a.querySelector("time")?.getAttribute("datetime")||"";
       const handleEl=[...a.querySelectorAll("a[role=\"link\"]")].find(l=>/^\/@?\w+$/.test(l.getAttribute("href")||""));
       const handle=handleEl?(handleEl.getAttribute("href")||"").replace(/^\//,"").replace(/^@/,""):"";
@@ -132,7 +132,7 @@ if [[ -z "$TARGET_INFO" ]]; then
 fi
 
 TARGET_URL=$(echo "$TARGET_INFO" | python3 -c "import json,sys;print(json.loads(sys.stdin.read()).get('url',''))")
-TWEET_TEXT=$(echo "$TARGET_INFO" | python3 -c "import json,sys;print(json.loads(sys.stdin.read()).get('text','')[:400])")
+TWEET_TEXT=$(echo "$TARGET_INFO" | python3 -c "import json,sys;print(json.loads(sys.stdin.read()).get('text',''))")
 HANDLE=$(echo "$TARGET_INFO" | python3 -c "import json,sys;print(json.loads(sys.stdin.read()).get('handle',''))")
 SCORE=$(echo "$TARGET_INFO" | python3 -c "import json,sys;d=json.loads(sys.stdin.read());print(f\"👁{d.get('views',0)} ({d.get('viewsPerMin',0):.1f}/min) ❤️{d.get('likes',0)} 🔁{d.get('rt',0)} 💬{d.get('replies',0)} age={d.get('ageMin',0)}m boost={d.get('freshnessBoost',0)} score={d.get('score',0):.0f}\")")
 

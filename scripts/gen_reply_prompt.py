@@ -6,5 +6,5 @@ handle = sys.argv[1] if len(sys.argv) > 1 else "?"
 tweet_text = sys.argv[2] if len(sys.argv) > 2 else ""
 
 template = open("/root/.openclaw/workspace/prompts/x_reply_prompt.txt", "r").read()
-prompt = template.replace("{HANDLE}", handle).replace("{TWEET_TEXT}", tweet_text[:400])
+prompt = template.replace("{HANDLE}", handle).replace("{TWEET_TEXT}", tweet_text)
 print(prompt)

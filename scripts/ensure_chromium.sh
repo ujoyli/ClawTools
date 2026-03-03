@@ -39,15 +39,28 @@ log "Checking CDP port $CDP_PORT..."
 if curl -s http://localhost:$CDP_PORT/json/version > /dev/null 2>&1; then
     log "✅ CDP port $CDP_PORT is responding"
 else
-    log "⚠️  CDP port $CDP_PORT not responding, starting Chromium..."
-    nohup chromium --headless --remote-debugging-port=$CDP_PORT --user-data-dir=/home/browserwing/chrome_user_data \
-        --no-first-run --no-default-browser-check --no-sandbox --disable-dev-shm-usage --disable-gpu \
-        > /tmp/chromium_$CDP_PORT.log 2>&1 &
-    sleep 8
-    if curl -s http://localhost:$CDP_PORT/json/version > /dev/null 2>&1; then
-        log "✅ Chromium started on port $CDP_PORT"
-    else
-        log "❌ Failed to start Chromium on port $CDP_PORT"
+    log "⚠️  CDP port $CDP_PORT not responding, restarting BrowserWing..."
+    # Kill existing processes
+    pkill -9 -f chrome 2>/dev/null || true
+    pkill -f browserwing 2>/dev/null || true
+    sleep 3
+    
+    # Start BrowserWing (which manages Chromium with CDP)
+    su - browserwing -c "cd /home/browserwing && /usr/local/bin/browserwing -config config.toml &"
+    
+    # Wait for CDP to be ready
+    log "Waiting for CDP port $CDP_PORT..."
+    for i in {1..30}; do
+        if curl -s http://localhost:$CDP_PORT/json/version > /dev/null 2>&1; then
+            log "✅ CDP port $CDP_PORT is ready"
+            break
+        fi
+        sleep 2
+    done
+    
+    if ! curl -s http://localhost:$CDP_PORT/json/version > /dev/null 2>&1; then
+        log "❌ Failed to start CDP on port $CDP_PORT after 60s"
+        exit 1
     fi
 fi
 
