@@ -1,0 +1,47 @@
+---
+name: BrowserWing
+description: Use BrowserWing HTTP API for browser automation via localhost service.
+read_when:
+  - Need BrowserWing API automation
+  - Need stable browser control through /api/v1/executor endpoints
+allowed-tools: Bash(curl:*)
+---
+
+# BrowserWing API Quick Skill
+
+Service base URL:
+- `http://127.0.0.1:18080`
+
+Health check:
+```bash
+curl -s http://127.0.0.1:18080/health
+```
+
+Known working executor endpoints:
+- `POST /api/v1/executor/navigate`
+- `POST /api/v1/executor/evaluate`
+- `POST /api/v1/executor/wait`
+- `POST /api/v1/executor/screenshot`
+
+Examples:
+```bash
+# Navigate
+curl -s -X POST http://127.0.0.1:18080/api/v1/executor/navigate \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://x.com/home","wait_until":"networkidle","timeout":60}'
+
+# Evaluate JS
+curl -s -X POST http://127.0.0.1:18080/api/v1/executor/evaluate \
+  -H 'Content-Type: application/json' \
+  -d '{"script":"() => document.title"}'
+
+# Wait for load
+curl -s -X POST http://127.0.0.1:18080/api/v1/executor/wait \
+  -H 'Content-Type: application/json' \
+  -d '{"load_state":"networkidle","timeout":60}'
+```
+
+Notes:
+- Prefer BrowserWing API as single route when requested.
+- If media upload endpoint is unavailable in this deployment, report explicitly instead of silently downgrading.
+- Keep Chromium process count under control before launching heavy flows.

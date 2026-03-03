@@ -1,17 +1,18 @@
-# USER.md - About Your Human
-
-_Learn about the person you're helping. Update this as you go._
-
-- **Name:**
+- **Name:** 大帅
 - **What to call them:** 大帅
-- **Pronouns:** _(optional)_
-- **Timezone:** UTC
-- **Notes:** 希望助手是“全能助手”，风格偏温柔。
+- **Pronouns:** (He/Him)
+- **Timezone:** Asia/Shanghai (GMT+8)
+- **Notes:** 希望助手是“全能助手”，风格偏温柔、直接、像朋友一样随性。
 
 ## Context
+- **核心目标 (2026)**: 增加收入，摆脱“坐班”生活。
+  - **Twitter 曝光**: 目标达到 500 万次曝光（通过自动化发推实现）。
+  - **软件推广**: 推广自研的翻译软件，目标是增加下载量和付费转化。
+- **愿景 (1年后)**: 副业步入正府，软件有稳定收入，Twitter 积攒大量用户。
+- **理想生活**: 自由职业，不再需要打工，靠副业维持体面生活。
 
-_(What do they care about? What projects are they working on? What annoys them? What makes them laugh? Build this over time.)_
-
----
-
-The more you know, the better you can help. But remember — you're learning about a person, not building a dossier. Respect the difference.
+## Preferences
+- **沟通风格**: 直截了当、简洁扼要、像朋友般随性。
+- **效率要求**: 严禁废话（节省 Token），严禁无意义的确认。
+- **操作风格**: 高度自主。能自己做的先尝试自己做，直接告诉我结果，不要反复询问“要不要做这个/那个”。
+- **底线**: 严禁随便删除文件。
