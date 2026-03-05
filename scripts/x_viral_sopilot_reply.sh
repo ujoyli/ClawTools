@@ -10,6 +10,10 @@ export NODE_PATH=/tmp/node_modules
 
 cd "$WORKDIR"
 
+# Ensure cookie and CDP are ready
+source "$WORKDIR/scripts/ensure_x_cookie.sh" > /tmp/ensure_cookie_fast_reply.log 2>&1 || true
+source "$WORKDIR/scripts/ensure_chromium.sh" > /tmp/ensure_chromium_fast_reply.log 2>&1 || true
+
 # Prevent overlap
 exec 9>/tmp/x_viral_fast_reply.lock
 flock -n 9 || exit 0
@@ -19,7 +23,13 @@ python3 -c "import random,time;s=random.randint(0,30);print(f'jitter={s}s');time
 
 # 1) Refresh sopilot targets
 echo "Refreshing sopilot hot targets..."
-python3 scripts/sopilot_hot_tweets.py --top 10 --min-prob 50 --min-views 10000 2>&1 || true
+REFRESH_OUT=$(python3 scripts/sopilot_hot_tweets.py --top 10 --min-prob 50 --min-views 10000 2>&1 || true)
+echo "$REFRESH_OUT"
+
+# Avoid misleading 'No tweets found' when cached targets still exist
+if echo "$REFRESH_OUT" | grep -qi "No tweets found"; then
+  echo "[warn] refresh returned no new tweets; will try existing targets file"
+fi
 
 TARGETS_FILE="$WORKDIR/data/sopilot_hot_targets.json"
 if [[ ! -f "$TARGETS_FILE" ]]; then
@@ -112,7 +122,12 @@ export REPLY_TEXT
 echo "Reply: $REPLY_TEXT"
 
 # 4) Post reply via CDP
-NODE_PATH=/tmp/node_modules node "$WORKDIR/skills/x-cdp/scripts/reply-tweet.js" "$TARGET_URL" "$REPLY_TEXT" --port 44407 | tee -a /tmp/x_fast_reply_post.log
+POST_OUT=$(NODE_PATH=/tmp/node_modules node "$WORKDIR/skills/x-cdp/scripts/reply-tweet.js" "$TARGET_URL" "$REPLY_TEXT" --port 44407 2>&1 | tee -a /tmp/x_fast_reply_post.log)
+
+if ! echo "$POST_OUT" | grep -Eiq "(OK|posted|success|replied)"; then
+  echo "Post may have failed: $POST_OUT" >&2
+  exit 1
+fi
 
 # 5) Log
 python3 - <<'PY'

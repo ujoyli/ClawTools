@@ -59,8 +59,36 @@ else
     done
     
     if ! curl -s http://localhost:$CDP_PORT/json/version > /dev/null 2>&1; then
-        log "❌ Failed to start CDP on port $CDP_PORT after 60s"
-        exit 1
+        log "⚠️ BrowserWing up but CDP still missing; launching standalone Chromium fallback on $CDP_PORT..."
+
+        CHROME_BIN=""
+        for c in chromium chromium-browser google-chrome-stable google-chrome; do
+            if command -v "$c" >/dev/null 2>&1; then CHROME_BIN="$c"; break; fi
+        done
+
+        if [ -z "$CHROME_BIN" ]; then
+            log "❌ No Chromium/Chrome binary found for fallback launch"
+            return 1 2>/dev/null || exit 1
+        fi
+
+        nohup "$CHROME_BIN" --headless --remote-debugging-port=$CDP_PORT \
+            --user-data-dir=/home/browserwing/chrome_user_data \
+            --no-first-run --no-default-browser-check --no-sandbox \
+            --disable-dev-shm-usage --disable-gpu \
+            > /tmp/chromium_$CDP_PORT.log 2>&1 &
+
+        for i in {1..20}; do
+            if curl -s http://localhost:$CDP_PORT/json/version > /dev/null 2>&1; then
+                log "✅ Fallback Chromium started on port $CDP_PORT"
+                break
+            fi
+            sleep 1
+        done
+
+        if ! curl -s http://localhost:$CDP_PORT/json/version > /dev/null 2>&1; then
+            log "❌ Failed to start CDP on port $CDP_PORT after fallback"
+            return 1 2>/dev/null || exit 1
+        fi
     fi
 fi
 
