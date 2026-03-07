@@ -88,8 +88,15 @@ def mark_posted(state_file: Path, slug: str, title: str, tweet_url: str) -> None
 
 
 if __name__ == "__main__":
-    # CLI: python pick_article.py <articles_dir> <state_file>
-    articles_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("articles")
-    state_file = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("state/posted.json")
-    result = pick_article(articles_dir, state_file)
-    print(json.dumps(result or {}, ensure_ascii=False, indent=2))
+    # Usage:
+    #   pick:  python pick_article.py <articles_dir> <state_file>
+    #   mark:  python pick_article.py mark <state_file> <slug> <title> <article_url>
+    if len(sys.argv) >= 2 and sys.argv[1] == "mark":
+        _, _, state, slug, title, url = sys.argv[:6]
+        mark_posted(Path(state), slug, title, url)
+        print(json.dumps({"ok": True, "slug": slug}))
+    else:
+        articles_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("articles")
+        state_file = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("state/posted.json")
+        result = pick_article(articles_dir, state_file)
+        print(json.dumps(result or {}, ensure_ascii=False, indent=2))
