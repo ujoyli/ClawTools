@@ -31,28 +31,28 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-ARTICLE_URL = "https://x.com/compose/articles"
+ARTICLE_LIST_URL = "https://x.com/compose/articles"
 
-# Toolbar "Insert" button selectors
-INSERT_BTN_SELECTORS = [
-    'button[aria-label*="插入"]',
-    'button[aria-label*="Insert" i]',
-    'span:has-text("插入")',
-    'span:has-text("Insert")',
+# Exact selectors confirmed via browser inspection
+COVER_FILE_INPUT = 'input[data-testid="fileInput"]'
+TITLE_SELECTORS = [
+    'textarea[placeholder="添加标题"]',
+    'textarea[placeholder*="title" i]',
+    'textarea[placeholder*="Title" i]',
+]
+BODY_SELECTORS = [
+    'div[role="textbox"]',
+    'div[contenteditable="true"]',
+]
+NEW_ARTICLE_SELECTORS = [
+    'a[href*="/compose/articles/new"]',
+    'button:has-text("撰写")',
+    'button:has-text("Write")',
+    'a:has-text("撰写")',
 ]
 
-# Insert menu → Image/Media option
-INSERT_IMAGE_SELECTORS = [
-    'div[role="menuitem"]:has-text("图片")',
-    'div[role="menuitem"]:has-text("Image")',
-    'div[role="menuitem"]:has-text("媒体")',
-    'div[role="menuitem"]:has-text("Media")',
-    'a:has-text("图片")',
-    'a:has-text("Image")',
-]
-
+# Publish button
 PUBLISH_BTN_SELECTORS = [
-    'button[data-testid="article-publish-button"]',
     'button:has-text("发布")',
     'button:has-text("Publish")',
 ]
@@ -143,37 +143,64 @@ def publish_article(
     dry_run: bool,
     insert_images: bool,
 ) -> None:
-    """Navigate to article editor and publish an article with inline images."""
-    logger.info("Navigating to article editor...")
-    page.goto(ARTICLE_URL, wait_until="domcontentloaded", timeout=60000)
+    """
+    Navigate to the article editor, fill content, and publish.
+
+    Flow:
+    1. Go to article list page
+    2. Click 'New article' / '撰写' to open editor
+    3. Upload cover image
+    4. Fill title and body
+    5. Click publish (unless dry-run)
+    """
+    logger.info("Navigating to article list...")
+    page.goto(ARTICLE_LIST_URL, wait_until="domcontentloaded", timeout=60000)
     page.wait_for_timeout(3000)
+
+    _click_new_article(page)
+    page.wait_for_timeout(5000)  # wait for editor to fully render
 
     _upload_cover_image(page, cover_image_path)
     _fill_title(page, title)
     _fill_body_with_blocks(page, blocks, insert_images)
+    page.wait_for_timeout(2000)  # let autosave kick in
 
     if dry_run:
         page.screenshot(path="/tmp/article_preview.png")
         logger.info("Dry run — preview saved to /tmp/article_preview.png")
+        logger.info("Current URL: %s", page.url)
         return
 
     _click_publish(page)
-    logger.info("Article published!")
+    logger.info("Article published! URL: %s", page.url)
+
+
+def _click_new_article(page: Page) -> None:
+    """Click the button/link to create a new article draft."""
+    logger.info("Clicking 'New article'...")
+    for sel in NEW_ARTICLE_SELECTORS:
+        try:
+            el = page.locator(sel).first
+            if el.count() > 0 and el.is_visible(timeout=2000):
+                el.click()
+                logger.info("Clicked: %s", sel)
+                return
+        except Exception:
+            continue
+    # Fallback: navigate directly to new article URL
+    logger.warning("'New article' button not found, navigating directly")
+    page.goto("https://x.com/compose/articles/new", wait_until="domcontentloaded", timeout=60000)
 
 
 def _upload_cover_image(page: Page, cover_path: str) -> None:
     """
-    Upload cover image via hidden file input.
-
-    Waits for the editor to render before attempting upload.
-    Skips gracefully if the file input is not found within the timeout.
+    Upload cover image via the hidden file input (data-testid='fileInput').
+    Skips gracefully if not found.
     """
     logger.info("Uploading cover image...")
     try:
-        # Wait for at least one file input to appear (editor is loaded)
-        page.wait_for_selector('input[type="file"]', timeout=15000)
-        file_input = page.locator('input[type="file"]').first
-        file_input.set_input_files(cover_path)
+        page.wait_for_selector(COVER_FILE_INPUT, timeout=10000)
+        page.locator(COVER_FILE_INPUT).first.set_input_files(cover_path)
         page.wait_for_timeout(3000)
         logger.info("Cover image uploaded")
     except Exception as e:
@@ -181,15 +208,21 @@ def _upload_cover_image(page: Page, cover_path: str) -> None:
 
 
 def _fill_title(page: Page, title: str) -> None:
-    """Fill the article title field."""
+    """Fill the article title via the textarea, trying selectors in order."""
     logger.info("Filling title: %s", title)
-    selectors = [
-        '[data-testid="article-title"]',
-        'div[contenteditable="true"][data-placeholder*="标题"]',
-        'div[contenteditable="true"][data-placeholder*="title" i]',
-        'h1[contenteditable="true"]',
-    ]
-    _click_and_type(page, selectors, title)
+    for sel in TITLE_SELECTORS:
+        try:
+            page.wait_for_selector(sel, timeout=5000)
+            el = page.locator(sel).first
+            el.click()
+            page.wait_for_timeout(200)
+            el.fill(title)
+            page.wait_for_timeout(500)
+            logger.info("Title filled via: %s", sel)
+            return
+        except Exception:
+            continue
+    logger.warning("Title fill failed: no matching selector found")
 
 
 def _fill_body_with_blocks(
@@ -200,18 +233,24 @@ def _fill_body_with_blocks(
     """
     Fill article body block by block.
 
-    For text blocks: keyboard-type into the contenteditable editor.
-    For image blocks: use the Insert toolbar button to upload local images.
+    Text blocks: type into the Draft.js contenteditable editor.
+    Image blocks: use the Insert toolbar (if insert_images is True).
     """
-    body_selectors = [
-        '[data-testid="article-body"]',
-        'div[contenteditable="true"][data-placeholder*="撰写"]',
-        'div[contenteditable="true"][data-placeholder*="write" i]',
-        'div.public-DraftEditor-content',
-    ]
-
-    # Focus the body editor
-    _focus_editor(page, body_selectors)
+    logger.info("Focusing body editor...")
+    focused = False
+    for sel in BODY_SELECTORS:
+        try:
+            page.wait_for_selector(sel, timeout=5000)
+            page.locator(sel).first.click()
+            logger.info("Body focused via: %s", sel)
+            focused = True
+            break
+        except Exception:
+            continue
+    if not focused:
+        logger.warning("Body editor focus failed, clicking center")
+        page.mouse.click(640, 550)
+    page.wait_for_timeout(300)
 
     image_count = 0
     for i, block in enumerate(blocks):
