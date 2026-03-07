@@ -14,14 +14,9 @@ Usage:
         --cookies /path/to/cookies.json \
         --title "文章标题" \
         --body "精简后的中文正文..." \
-        --article-url "https://x.com/..."   # set after article is published
         [--dry-run]
 
-Environment (for promo tweet):
-    TWITTER_CONSUMER_KEY
-    TWITTER_CONSUMER_SECRET
-    TWITTER_ACCESS_TOKEN
-    TWITTER_ACCESS_TOKEN_SECRET
+Environment: only X_COOKIES_FILE (or --cookies). No Twitter API keys needed.
 """
 
 import argparse
@@ -39,7 +34,7 @@ REPO_ROOT = SKILL_DIR.parent.parent
 
 X_PUB_ARTICLE_DIR = REPO_ROOT / "x_pub_article"
 PUBLISH_SCRIPT = X_PUB_ARTICLE_DIR / "publish_article.py"
-TWEET_JS = REPO_ROOT / "skills" / "twitter-post" / "scripts" / "tweet.js"
+POST_TWEET_PW = REPO_ROOT / "scripts" / "PostTweet_PW.py"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -96,8 +91,11 @@ def publish_article(cookies: str, title: str, body: str, dry_run: bool) -> str:
     return "https://x.com"
 
 
-def post_promo_tweet(title: str, body: str, article_url: str, dry_run: bool) -> dict:
-    """Post a promotional tweet with the article URL."""
+def post_promo_tweet(title: str, body: str, article_url: str, cookies: str, dry_run: bool) -> dict:
+    """
+    Post a promotional tweet via PostTweet_PW.py (Playwright + cookies).
+    No Twitter API keys required.
+    """
     teaser = body[:TEASER_MAX_CHARS].rstrip()
     if len(body) > TEASER_MAX_CHARS:
         cut = teaser.rfind("，")
@@ -110,12 +108,12 @@ def post_promo_tweet(title: str, body: str, article_url: str, dry_run: bool) -> 
         return {"ok": True, "url": "https://x.com/dry-run/tweet"}
 
     result = subprocess.run(
-        ["node", str(TWEET_JS), tweet_text],
-        capture_output=True, text=True, env=os.environ.copy(), timeout=60,
+        ["python3", str(POST_TWEET_PW), "--cookie-file", cookies, "--text", tweet_text],
+        capture_output=True, text=True, timeout=120,
     )
     output = result.stdout.strip()
     if not output:
-        raise RuntimeError(f"tweet.js no output. stderr: {result.stderr}")
+        raise RuntimeError(f"PostTweet_PW.py no output. stderr: {result.stderr}")
     return json.loads(output)
 
 
@@ -127,7 +125,7 @@ def main() -> None:
     logger.info("Article URL: %s", article_url)
 
     # 2. Promo tweet
-    promo = post_promo_tweet(args.title, args.body, article_url, args.dry_run)
+    promo = post_promo_tweet(args.title, args.body, article_url, args.cookies, args.dry_run)
     if promo.get("ok"):
         logger.info("Promo tweet: %s", promo.get("url"))
     else:
