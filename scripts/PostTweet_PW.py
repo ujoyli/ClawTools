@@ -33,7 +33,10 @@ def main():
 
     result = {'ok': False}
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, executable_path='/usr/bin/chromium', args=['--no-sandbox','--disable-dev-shm-usage'])
+        launch_kwargs = {'headless': True, 'args': ['--no-sandbox', '--disable-dev-shm-usage']}
+        if os.path.exists('/usr/bin/chromium'):
+            launch_kwargs['executable_path'] = '/usr/bin/chromium'
+        browser = p.chromium.launch(**launch_kwargs)
         context = browser.new_context(viewport={'width': 1366, 'height': 900})
         context.add_cookies(cookies)
         page = context.new_page()

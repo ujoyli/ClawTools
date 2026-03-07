@@ -86,9 +86,38 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_cookies(path: str) -> list[dict]:
-    """Load cookies from JSON file (EditThisCookie format)."""
+    """Load and normalize cookies from JSON file (EditThisCookie format)."""
     with open(path, encoding="utf-8") as f:
-        return json.load(f)
+        raw = json.load(f)
+    return [_normalize_cookie(c) for c in raw if c.get("name") and c.get("domain")]
+
+
+def _normalize_cookie(c: dict) -> dict:
+    """
+    Normalize a raw EditThisCookie entry to Playwright's expected format.
+
+    Playwright requires sameSite to be exactly 'Strict', 'Lax', or 'None'.
+    """
+    ss = str(c.get("sameSite", "")).lower()
+    if ss in ("none", "no_restriction"):
+        same_site = "None"
+    elif ss == "strict":
+        same_site = "Strict"
+    else:
+        same_site = "Lax"
+
+    normalized = {
+        "name": c["name"],
+        "value": c["value"],
+        "domain": c["domain"],
+        "path": c.get("path", "/"),
+        "httpOnly": bool(c.get("httpOnly", False)),
+        "secure": bool(c.get("secure", True)),
+        "sameSite": same_site,
+    }
+    if c.get("expirationDate"):
+        normalized["expires"] = int(c["expirationDate"])
+    return normalized
 
 
 def create_context(playwright, cookies: list[dict], headless: bool) -> BrowserContext:
@@ -116,8 +145,8 @@ def publish_article(
 ) -> None:
     """Navigate to article editor and publish an article with inline images."""
     logger.info("Navigating to article editor...")
-    page.goto(ARTICLE_URL, wait_until="networkidle", timeout=30000)
-    page.wait_for_timeout(2000)
+    page.goto(ARTICLE_URL, wait_until="domcontentloaded", timeout=60000)
+    page.wait_for_timeout(3000)
 
     _upload_cover_image(page, cover_image_path)
     _fill_title(page, title)
@@ -133,11 +162,22 @@ def publish_article(
 
 
 def _upload_cover_image(page: Page, cover_path: str) -> None:
-    """Upload cover image via the hidden file input at the top of the editor."""
+    """
+    Upload cover image via hidden file input.
+
+    Waits for the editor to render before attempting upload.
+    Skips gracefully if the file input is not found within the timeout.
+    """
     logger.info("Uploading cover image...")
-    file_input = page.locator('input[type="file"]').first
-    file_input.set_input_files(cover_path)
-    page.wait_for_timeout(3000)
+    try:
+        # Wait for at least one file input to appear (editor is loaded)
+        page.wait_for_selector('input[type="file"]', timeout=15000)
+        file_input = page.locator('input[type="file"]').first
+        file_input.set_input_files(cover_path)
+        page.wait_for_timeout(3000)
+        logger.info("Cover image uploaded")
+    except Exception as e:
+        logger.warning("Cover image upload skipped: %s", e)
 
 
 def _fill_title(page: Page, title: str) -> None:
