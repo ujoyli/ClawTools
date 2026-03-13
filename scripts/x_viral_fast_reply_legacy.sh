@@ -69,7 +69,7 @@ cat > "$PROMPT_FILE" <<EOF
 你是一个擅长在 X(推特) 爆款推文下写高质量评论的账号运营。
 写作风格：去 AI 味，像真人在评论区顺手丢一句。
 要求：
-- 简短、有态度（<= 180 字符）
+- 简短、有态度（**必须 <= 60 字**）
 - 如果原推文含中文就用中文回复；否则用英文
 - 不要复读原文，不要“总结式/教科书式”
 - 避免 AI 常见套话："很棒的分享"、"值得关注"、"深入探讨"、"让我们" 等
@@ -131,7 +131,7 @@ fi
 export REPLY_TEXT
 
 # 3) Reply via X-CDP
-NODE_PATH=/tmp/node_modules node "$WORKDIR/skills/x-cdp/scripts/reply-tweet.js" "$TARGET_URL" "$REPLY_TEXT" --port 18802 | tee -a /tmp/x_fast_reply_post.log
+NODE_PATH=/tmp/node_modules node "$WORKDIR/skills/x-cdp/scripts/reply-tweet.js" "$TARGET_URL" "$REPLY_TEXT" --port 44407 | tee -a /tmp/x_fast_reply_post.log
 
 # 4) Append local evidence log
 python3 - <<'PY'

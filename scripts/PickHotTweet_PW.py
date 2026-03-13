@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-import argparse, json, re, time
+import argparse, json, re, sys, time
+import importlib.util
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 
 def parse_count(s: str) -> int:
@@ -19,6 +21,28 @@ def parse_count(s: str) -> int:
     elif u == 'B':
         v *= 1_000_000_000
     return int(v)
+
+
+def chinese_char_count(s: str) -> int:
+    return len(re.findall(r'[\u4e00-\u9fff]', s or ''))
+
+
+def english_letter_count(s: str) -> int:
+    return len(re.findall(r'[A-Za-z]', s or ''))
+
+
+def is_english_tweet(s: str) -> bool:
+    zh = chinese_char_count(s)
+    en = english_letter_count(s)
+    # Require substantial English and very little Chinese
+    return en >= 12 and zh <= 2 and en > zh * 4
+
+
+def is_chinese_tweet(s: str) -> bool:
+    zh = chinese_char_count(s)
+    en = english_letter_count(s)
+    # Require substantial Chinese and Chinese-dominant text
+    return zh >= 6 and zh >= en
 
 
 def to_playwright_cookie(c):
@@ -40,6 +64,7 @@ def to_playwright_cookie(c):
     }
     if c.get('expirationDate'):
         d['expires'] = int(c['expirationDate'])
+    # Don't add expires field if not present - Playwright doesn't accept None
     return d
 
 
@@ -47,7 +72,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--cookie-file', required=True)
     ap.add_argument('--replied-file', default='/root/.openclaw/workspace/data/x_replied_targets.json')
-    ap.add_argument('--max-age-min', type=int, default=240)
+    ap.add_argument('--max-age-min', type=int, default=120)  # 2 hours rule
+    ap.add_argument('--min-views', type=int, default=10000)   # minimum views threshold
     args = ap.parse_args()
 
     try:
@@ -107,12 +133,62 @@ def main():
 """)
         browser.close()
 
+    # Load blacklist
+    blacklist = []
+    try:
+        blacklist = [line.strip() for line in open('/root/.openclaw/workspace/data/blacklist.txt') if line.strip()]
+    except:
+        pass
+
+    # Load topic filters using importlib (avoid sys.path manipulation)
+    # Initialize defaults first to ensure variables always exist
+    is_political = lambda txt: False
+    get_topic_score = lambda txt: 0
+    tech_keywords = []
+    society_keywords = []
+    
+    try:
+        spec = importlib.util.spec_from_file_location('x_topic_filters', '/root/.openclaw/workspace/data/x_topic_filters.py')
+        if spec and spec.loader:
+            x_topic_filters = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(x_topic_filters)
+            is_political = getattr(x_topic_filters, 'is_political', is_political)
+            get_topic_score = getattr(x_topic_filters, 'get_topic_score', get_topic_score)
+            tech_keywords = [kw.lower() for kw in getattr(x_topic_filters, 'TECH_KEYWORDS', [])]
+            society_keywords = [kw.lower() for kw in getattr(x_topic_filters, 'SOCIETY_KEYWORDS', [])]
+    except Exception as e:
+        print(f"[warn] Failed to load topic filters: {e}", file=sys.stderr)
+        pass  # Keep defaults
+
     best = None
+
+    # Time-based language rule (Asia/Shanghai):
+    # 03:00-08:59 -> English only
+    # other times -> Chinese only
+    sh_hour = datetime.now(ZoneInfo('Asia/Shanghai')).hour
+    english_only_window = 3 <= sh_hour < 9
+
     for t in tweets:
         if t['tid'] in replied:
             continue
-        if len(re.findall(r'[\u4e00-\u9fffA-Za-z]', t['text'])) < 8:
+        # Check blacklist
+        url_lower = t.get('url', '').lower()
+        if any(b in url_lower for b in blacklist):
             continue
+        # Filter political content
+        if is_political(t.get('text', '')):
+            continue
+        text = t.get('text', '')
+        if len(re.findall(r'[\u4e00-\u9fffA-Za-z]', text)) < 8:
+            continue
+
+        # Apply time-window language rule
+        if english_only_window:
+            if not is_english_tweet(text):
+                continue
+        else:
+            if not is_chinese_tweet(text):
+                continue
 
         age_min = 60
         if t.get('time'):
@@ -124,11 +200,20 @@ def main():
         if age_min > args.max_age_min:
             continue
 
+        # Parse engagement metrics before filtering (supports both EN and CN)
         label = t.get('label', '')
-        replies = parse_count(re.search(r'(\d[\d\.,KMB]*)\s+repl', label, re.I).group(1)) if re.search(r'(\d[\d\.,KMB]*)\s+repl', label, re.I) else 0
-        retweets = parse_count(re.search(r'(\d[\d\.,KMB]*)\s+repost|retweet', label, re.I).group(1)) if re.search(r'(\d[\d\.,KMB]*)\s+repost|retweet', label, re.I) else 0
-        likes = parse_count(re.search(r'(\d[\d\.,KMB]*)\s+like', label, re.I).group(1)) if re.search(r'(\d[\d\.,KMB]*)\s+like', label, re.I) else 0
-        views = parse_count(re.search(r'(\d[\d\.,KMB]*)\s+view', label, re.I).group(1)) if re.search(r'(\d[\d\.,KMB]*)\s+view', label, re.I) else 0
+        # Replies: "1292 回复" or "1292 repl"
+        replies = parse_count(re.search(r'(\d+)\s*回复', label).group(1)) if re.search(r'(\d+)\s*回复', label) else (parse_count(re.search(r'(\d[\d\.,KMB]*)\s*repl', label, re.I).group(1)) if re.search(r'(\d[\d\.,KMB]*)\s*repl', label, re.I) else 0)
+        # Retweets: "497 次转帖" or "497 repost/retweet"
+        retweets = parse_count(re.search(r'(\d+)\s*次转帖', label).group(1)) if re.search(r'(\d+)\s*次转帖', label) else (parse_count(re.search(r'(\d[\d\.,KMB]*)\s*(?:repost|retweet)', label, re.I).group(1)) if re.search(r'(\d[\d\.,KMB]*)\s*(?:repost|retweet)', label, re.I) else 0)
+        # Likes: "5023 喜欢" or "5023 like"
+        likes = parse_count(re.search(r'(\d+)\s*喜欢', label).group(1)) if re.search(r'(\d+)\s*喜欢', label) else (parse_count(re.search(r'(\d[\d\.,KMB]*)\s*like', label, re.I).group(1)) if re.search(r'(\d[\d\.,KMB]*)\s*like', label, re.I) else 0)
+        # Views: "398918 次观看" or "398918 view"
+        views = parse_count(re.search(r'(\d+)\s*次观看', label).group(1)) if re.search(r'(\d+)\s*次观看', label) else (parse_count(re.search(r'(\d[\d\.,KMB]*)\s*view', label, re.I).group(1)) if re.search(r'(\d[\d\.,KMB]*)\s*view', label, re.I) else 0)
+
+        # New rule from 大帅: only reply to tweets <3h old AND >1000 views
+        if views < args.min_views:
+            continue
 
         velocity = (views + 1) / age_min
         score = replies * 8 + retweets * 5 + likes * 2 + velocity
@@ -142,6 +227,12 @@ def main():
             score -= 35
         if t['isReply']:
             score -= 20
+        # Topic boost: tech > society > others
+        text_lower = t.get('text', '').lower()
+        if any(kw in text_lower for kw in tech_keywords):
+            score += 80
+        elif any(kw in text_lower for kw in society_keywords):
+            score += 40
 
         t.update({'score': round(score, 2), 'ageMin': round(age_min, 1), 'views': views, 'likes': likes, 'rt': retweets, 'replies': replies})
         if best is None or t['score'] > best['score']:

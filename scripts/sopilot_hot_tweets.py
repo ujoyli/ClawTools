@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-Scrape sopilot.net/zh/hot-tweets via agent-browser, save hot targets.
+Scrape sopilot.net/zh/hot-tweets via Playwright, save hot targets.
 """
-import json, re, sys, os, time, argparse, subprocess, tempfile
+import json, re, sys, os, time, argparse
+from typing import List, Dict
 
 REPLIED_PATH = "/root/.openclaw/workspace/data/x_replied_targets.json"
 DEDUP_WINDOW = 72 * 3600
@@ -10,13 +11,17 @@ OUT_PATH = "/root/.openclaw/workspace/data/sopilot_hot_targets.json"
 
 
 def parse_view_count(s: str) -> int:
-    s = s.replace(",", "").strip()
+    s = (s or "").replace(",", "").strip()
     m = re.match(r"([\d.]+)\s*万", s)
-    if m: return int(float(m.group(1)) * 10000)
+    if m:
+        return int(float(m.group(1)) * 10000)
     m = re.match(r"([\d.]+)\s*[kK]", s)
-    if m: return int(float(m.group(1)) * 1000)
-    try: return int(float(s))
-    except: return 0
+    if m:
+        return int(float(m.group(1)) * 1000)
+    try:
+        return int(float(s))
+    except Exception:
+        return 0
 
 
 def get_replied_ids() -> set:
@@ -25,80 +30,131 @@ def get_replied_ids() -> set:
         replied = obj.get("replied", {})
         now = int(time.time())
         return {k for k, v in replied.items() if isinstance(v, int) and now - v < DEDUP_WINDOW}
-    except:
+    except Exception:
         return set()
 
 
-def scrape():
-    tmp = tempfile.mktemp(suffix=".json")
-    js = f'''(function(){{
-const main = document.querySelector("main");
-if (!main) return;
-const tweetLinks = [...main.querySelectorAll("a[href*=tweetId]")];
-const uniqueIds = [...new Set(tweetLinks.map(a => {{const m=a.href.match(/tweetId=(\\d+)/);return m?m[1]:null}}).filter(Boolean))];
-const text = main.innerText;
-const blocks = text.split(/(?=[\\d.]+[万kK]?粉\\n)/);
-const results = [];
-let idIdx = 0;
-for (const block of blocks) {{
-  const hm = block.match(/@(\\w+)/);
-  if (!hm) continue;
-  const handle = hm[1];
-  const tm = block.match(/前发布\\n\\n([\\s\\S]*?)(?:\\n\\d{{1,6}}\\n)/);
-  const tweetText = tm ? tm[1].trim().substring(0,500) : "";
-  const pm = block.match(/起爆概率\\n(\\d+)%/);
-  const prob = pm ? parseInt(pm[1]) : 0;
-  const vm = block.match(/预测浏览量\\n([\\d,.]+[万kK]?)/);
-  const pv = vm ? vm[1] : "0";
-  const fm = block.match(/([\\d.]+[万kK]?)粉/);
-  const followers = fm ? fm[1] : "0";
-  const nm = block.match(/粉\\n(.+?)\\n@/);
-  const name = nm ? nm[1].trim() : handle;
-  const em = block.match(/预计可获得\\s*([\\d,.]+[万kK]?)\\s*次曝光/);
-  const exposure = em ? em[1] : "0";
-  const tid = idIdx < uniqueIds.length ? uniqueIds[idIdx] : null;
-  idIdx++;
-  results.push({{handle,name,followers,tweetText,prob,predictedViews:pv,exposure,tweetId:tid,url:tid?"https://x.com/"+handle+"/status/"+tid:null}});
-}}
-// Write to window for extraction
-window.__sopilot_data = results;
-}})()'''
+def _extract_with_playwright() -> Dict:
+    from playwright.sync_api import sync_playwright
 
-    # Ensure page loaded
-    subprocess.run(["agent-browser", "open", "https://sopilot.net/zh/hot-tweets"],
-                   capture_output=True, text=True, timeout=20)
-    time.sleep(5)
+    with sync_playwright() as p:
+        b = p.chromium.launch(
+            headless=True,
+            executable_path='/usr/bin/chromium',
+            args=['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+        )
+        page = b.new_page(viewport={'width': 1366, 'height': 900})
+        page.goto('https://sopilot.net/zh/hot-tweets', wait_until='domcontentloaded', timeout=90000)
+        page.wait_for_timeout(10000)
 
-    # Run extraction
-    subprocess.run(["agent-browser", "eval", js], capture_output=True, text=True, timeout=15)
+        data = page.evaluate('''() => {
+          const text = (document.querySelector('main')?.innerText || document.body?.innerText || '').trim();
+          const ids = [...new Set(
+            [...document.querySelectorAll('a[href*="tweetId="]')]
+              .map(a => {
+                const m = (a.href || '').match(/tweetId=(\d+)/);
+                return m ? m[1] : null;
+              })
+              .filter(Boolean)
+          )];
+          return { text, ids, title: document.title || '' };
+        }''')
 
-    # Read data back via a file write approach
-    write_js = f'JSON.stringify(window.__sopilot_data || [])'
-    r = subprocess.run(["agent-browser", "eval", write_js], capture_output=True, text=True, timeout=10)
-    raw = (r.stdout or '').strip()
+        b.close()
+        return data
 
-    if not raw:
+
+def _parse_blocks(main_text: str, ids: List[str]) -> List[Dict]:
+    # Split by follower marker which is stable on SoPilot cards, e.g. "2.2万粉"
+    chunks = re.split(r'(?=(?:\d+(?:\.\d+)?(?:万)?粉))', main_text)
+
+    results = []
+    id_idx = 0
+    seen_tid = set()
+
+    for c in chunks:
+        c = c.strip()
+        if not c:
+            continue
+
+        hm = re.search(r'@(\w+)', c)
+        if not hm:
+            continue
+        handle = hm.group(1)
+
+        # name: text between followers and @handle
+        nm = re.search(r'(?:\d+(?:\.\d+)?(?:万)?粉)\s*\n(.+?)\n@', c, re.S)
+        name = (nm.group(1).strip() if nm else handle)
+
+        # publish text block usually after "发布"
+        tm = re.search(r'发布\s*\n\n([\s\S]*?)(?:\n\s*起爆概率|\n\s*预测浏览量|\n\s*预计可获得|$)', c)
+        tweet_text = (tm.group(1).strip() if tm else "")
+        tweet_text = re.sub(r'\n{3,}', '\n\n', tweet_text)[:500]
+
+        pm = re.search(r'起爆概率\s*\n\s*(\d+)\s*%', c)
+        prob = int(pm.group(1)) if pm else 0
+
+        # age parse: e.g. "4小时前发布" / "35分钟前发布"
+        age_h = 999.0
+        ah = re.search(r'(\d+(?:\.\d+)?)\s*小时前发布', c)
+        am = re.search(r'(\d+(?:\.\d+)?)\s*分钟前发布', c)
+        if ah:
+            age_h = float(ah.group(1))
+        elif am:
+            age_h = float(am.group(1)) / 60.0
+
+        vm = re.search(r'预测浏览量\s*\n\s*([\d.,]+[万kK]?)', c)
+        predicted = vm.group(1).strip() if vm else '0'
+
+        em = re.search(r'预计可获得\s*([\d.,]+[万kK]?)\s*次曝光', c)
+        exposure = em.group(1).strip() if em else '0'
+
+        fm = re.search(r'(\d+(?:\.\d+)?(?:万)?粉)', c)
+        followers = fm.group(1) if fm else '0'
+
+        tid = ids[id_idx] if id_idx < len(ids) else None
+        id_idx += 1
+
+        if tid and tid in seen_tid:
+            continue
+        if tid:
+            seen_tid.add(tid)
+
+        url = f"https://x.com/{handle}/status/{tid}" if tid else ""
+
+        # Basic quality gate
+        if len(re.sub(r'\s+', '', tweet_text)) < 12:
+            continue
+
+        results.append({
+            'handle': handle,
+            'name': name,
+            'followers': followers,
+            'tweetText': tweet_text,
+            'prob': prob,
+            'predictedViews': predicted,
+            'exposure': exposure,
+            'age_h': round(age_h, 3),
+            'tweetId': tid,
+            'url': url,
+        })
+
+    return results
+
+
+def scrape() -> List[Dict]:
+    try:
+        data = _extract_with_playwright()
+        main_text = data.get('text', '')
+        ids = data.get('ids', [])
+        if not main_text or not ids:
+            return []
+
+        rows = _parse_blocks(main_text, ids)
+        return rows
+    except Exception as e:
+        print(f"scrape error: {e}", file=sys.stderr)
         return []
-
-    # Remove outer quotes from agent-browser
-    if raw.startswith('"') and raw.endswith('"'):
-        try:
-            raw = json.loads(raw)  # unescape quoted JSON string
-        except Exception:
-            return []
-
-    if isinstance(raw, str):
-        # best-effort extract first JSON array fragment
-        m = re.search(r'\[.*\]', raw, re.S)
-        if m:
-            raw = m.group(0)
-        try:
-            parsed = json.loads(raw)
-            return parsed if isinstance(parsed, list) else []
-        except Exception:
-            return []
-
-    return raw if isinstance(raw, list) else []
 
 
 def main():
@@ -118,9 +174,9 @@ def main():
 
     filtered = []
     for t in tweets:
-        if t["prob"] < args.min_prob:
+        if t.get("prob", 0) < args.min_prob:
             continue
-        pv = parse_view_count(t["predictedViews"])
+        pv = parse_view_count(t.get("predictedViews", "0"))
         if pv < args.min_views:
             continue
         if not t.get("url"):
@@ -131,7 +187,7 @@ def main():
         t["predictedViewsNum"] = pv
         filtered.append(t)
 
-    filtered.sort(key=lambda x: x["predictedViewsNum"], reverse=True)
+    filtered.sort(key=lambda x: x.get("predictedViewsNum", 0), reverse=True)
     top = filtered[:args.top]
 
     os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
@@ -140,8 +196,8 @@ def main():
         f.write("\n")
 
     for i, t in enumerate(top):
-        print(f"{i+1}. @{t['handle']} 起爆{t['prob']}% 预测{t['predictedViews']} | {t['url']}")
-        print(f"   {t['tweetText'][:100]}")
+        print(f"{i+1}. @{t['handle']} 起爆{t.get('prob',0)}% 预测{t.get('predictedViews','0')} | {t.get('url','')}")
+        print(f"   {t.get('tweetText','')[:100]}")
 
     print(f"\nSaved {len(top)} targets to {OUT_PATH}")
 

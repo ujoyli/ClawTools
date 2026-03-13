@@ -74,38 +74,71 @@ function parseViewsFromText(t) {
     process.exit(2);
   }
 
-  const { browser } = await connect(args.port);
-  const page = await browser.newPage();
+  const MAX_TRIES = 3;
+  let attempt = 0;
+  let lastError = null;
 
-  try {
-    await goto(page, args.url, { timeout: 45000 });
-    // Ensure tweet detail loads
-    await page.waitForSelector('[data-testid="tweet"]', { timeout: 20000 }).catch(() => {});
-    await sleep(2500);
+  while (attempt < MAX_TRIES) {
+    attempt++;
+    const backoff = 1000 * attempt;
+    let browser, page;
+    try {
+      const conn = await connect(args.port);
+      browser = conn.browser;
+      page = await browser.newPage();
 
-    // Expand metrics section if needed by scrolling a bit
-    await page.evaluate(() => window.scrollBy(0, 500)).catch(() => {});
-    await sleep(1500);
+      await goto(page, args.url, { timeout: 60000 });
+      // Ensure tweet detail loads
+      await page.waitForSelector('[data-testid="tweet"]', { timeout: 25000 }).catch(() => {});
+      await sleep(2500);
 
-    const raw = await page.evaluate(() => {
-      // try a few likely containers
-      const candidates = [];
-      const metric = document.querySelector('[data-testid="app-text-transition-container"]');
-      if (metric) candidates.push(metric.innerText);
-      const article = document.querySelector('article');
-      if (article) candidates.push(article.innerText);
-      candidates.push(document.body.innerText);
-      return candidates.filter(Boolean).join('\n----\n');
-    });
+      // Expand metrics section if needed by scrolling a bit
+      await page.evaluate(() => window.scrollBy(0, 500)).catch(() => {});
+      await sleep(1500);
 
-    const views = parseViewsFromText(raw);
+      const raw = await page.evaluate(() => {
+        // try a few likely containers
+        const candidates = [];
+        const metric = document.querySelector('[data-testid="app-text-transition-container"]');
+        if (metric) candidates.push(metric.innerText);
+        const article = document.querySelector('article');
+        if (article) candidates.push(article.innerText);
+        // also try looking for elements that contain the word 'Views' or '次观看'
+        const els = Array.from(document.querySelectorAll('div,span'));
+        for (const el of els.slice(0, 200)) {
+          try {
+            const t = (el.innerText || '').trim();
+            if (t && /Views|次观看|观看/i.test(t)) candidates.push(t);
+          } catch (e) {}
+        }
+        candidates.push(document.body.innerText);
+        return candidates.filter(Boolean).join('\n----\n');
+      });
 
-    console.log(JSON.stringify({ ok: views !== null, url: args.url, views: views, raw: views !== null ? null : raw.slice(0, 2000) }));
-  } catch (e) {
-    console.log(JSON.stringify({ ok: false, url: args.url, error: String(e.message || e) }));
-    process.exit(1);
-  } finally {
-    try { await page.close(); } catch {}
-    try { browser.disconnect(); } catch {}
+      const views = parseViewsFromText(raw);
+
+      console.log(JSON.stringify({ ok: views !== null, url: args.url, views: views, raw: views !== null ? null : raw.slice(0, 2000) }));
+
+      try { await page.close(); } catch (e) {}
+      try { browser.disconnect(); } catch (e) {}
+      process.exit(0);
+    } catch (e) {
+      lastError = e;
+      try { if (page) await page.close(); } catch (ex) {}
+      try { if (browser && browser.disconnect) browser.disconnect(); } catch (ex) {}
+      // transient errors: retry
+      const msg = String(e && e.message ? e.message : e);
+      if (/timeout|ECONNRESET|EPIPE|Target closed|Protocol error|connect ECONNREFUSED/i.test(msg)) {
+        if (attempt < MAX_TRIES) {
+          await new Promise(r => setTimeout(r, backoff));
+          continue;
+        }
+      }
+      console.log(JSON.stringify({ ok: false, url: args.url, error: msg }));
+      process.exit(1);
+    }
   }
+
+  console.log(JSON.stringify({ ok: false, url: args.url, error: String(lastError || 'unknown') }));
+  process.exit(1);
 })();

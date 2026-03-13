@@ -181,3 +181,123 @@ EXIT:1
 - Related Files: /root/.openclaw/workspace/scripts/rebang_to_tweet.py
 
 ---
+## [ERR-20260304-001] x_viral_interact_agent-no-targets
+
+**Logged**: 2026-03-04T15:30:00+08:00
+**Priority**: medium
+**Status**: pending
+**Area**: backend
+
+### Summary
+`x_viral_interact_agent.sh` failed to find viral targets after all retries and exited with code 75.
+
+### Error
+```
+Hunting for viral targets...
+Try 1 failed to find targets. Retrying in 10s...
+Try 2 failed to find targets. Retrying in 10s...
+Try 3 failed to find targets. Retrying in 10s...
+FAILED: No targets found after 3 tries.
+(Command exited with code 75)
+```
+
+### Context
+- Command: `bash /root/.openclaw/workspace/scripts/x_viral_interact_agent.sh`
+- Trigger: cron `x:viral-interact`
+- Time: 2026-03-04 15:30 (Asia/Shanghai)
+
+### Suggested Fix
+- Verify upstream target discovery source is returning candidates at run time.
+- Add fallback query/topic set when primary discovery returns empty.
+- Emit diagnostic details (API response size/filter thresholds) per retry.
+
+### Metadata
+- Reproducible: unknown
+- Related Files: /root/.openclaw/workspace/scripts/x_viral_interact_agent.sh
+
+---
+
+---
+
+## [ERR-20260306-001] x-timeline-agent-generates-status-report-instead-of-reply
+
+**Logged**: 2026-03-06T10:20:00+08:00
+**Priority**: critical
+**Status**: open
+**Area**: automation/x-cdp
+
+### Summary
+The `x_timeline_new_playwright.sh` script's AI agent step generates a system status report instead of a contextual tweet reply.
+
+### Expected Behavior
+Agent should generate a 10-80 character casual, human-like reply to the picked tweet following the prompt in `prompts/x_reply_prompt.txt`.
+
+### Actual Behavior
+Agent generated:
+```
+大帅，我检查了系统状态，一切正常运行中：
+## ✅ 当前状态
+**X 时间线自动回复**
+- 最近成功：10:14 AM - 脚本执行完成
+...
+```
+
+This is a status report to 大帅，not a tweet reply.
+
+### Context
+- Picked tweet: @KKaWSB "她真的照亮了他的世界，哈哈哈哈" (score=241.08)
+- Prompt template: `prompts/x_reply_prompt.txt` (correctly formatted)
+- Agent command: `openclaw agent --session-id "$SESSION_ID" --thinking minimal --timeout 120 --json --message "$PROMPT"`
+- The agent session receives full workspace context (SOUL.md, AGENTS.md, etc.)
+
+### Root Cause Hypothesis
+1. Agent is confused by SOUL.md/AGENTS.md context telling it to "report status" and "be proactive"
+2. The `openclaw agent` command may be injecting system instructions that override the prompt
+3. Agent interprets the cron job context as a request for status reporting
+
+### Suggested Fix
+1. Add explicit instruction to prompt: "绝对不要报告系统状态，这只是回复一条推文"
+2. Consider using a more isolated agent session without full workspace context
+3. Or use a simpler API call instead of full agent session
+4. Add validation step: if reply contains "系统状态" or "当前状态", regenerate
+
+### Impact
+- Tweet was logged as "replied" but with wrong content
+- 265+ cumulative replies may have similar issues (need audit)
+- Automation appears working but producing garbage output
+
+### Metadata
+- Reproducible: unknown (need to check prior runs)
+- Related Files: scripts/x_timeline_new_playwright.sh, prompts/x_reply_prompt.txt
+- Related Error: Check /tmp/x_timeline_new_pw_reply.json for evidence
+
+## [ERR-20260308-001] x_viral_interact_agent.sh
+
+**Logged**: 2026-03-08T02:02:00+08:00
+**Priority**: high
+**Status**: pending
+**Area**: infra
+
+### Summary
+x_viral_interact_agent.sh exited with code 141 after finding target due a pipe/SIGPIPE bug in VIEWS parsing.
+
+### Error
+```bash
+Hunting for viral targets...
+Found target: https://x.com/web3usb/status/2030337107076714640
+(Command exited with code 141)
+```
+
+### Context
+- Command attempted: `bash /root/.openclaw/workspace/scripts/x_viral_interact_agent.sh`
+- In script, `VIEWS=$(echo "$VIEWS_JSON" | python3 - <<'PY' ...)` combines a pipe with `python3 -` here-doc.
+- `python3 -` reads the script body from stdin and exits before consuming piped JSON, causing `echo` to hit SIGPIPE under `set -o pipefail`.
+
+### Suggested Fix
+Avoid piping into `python3 -` with heredoc. Pass JSON via env var or temp file, e.g. `python3 -c '...'` with `VIEWS_JSON` env.
+
+### Metadata
+- Reproducible: yes
+- Related Files: scripts/x_viral_interact_agent.sh
+
+---

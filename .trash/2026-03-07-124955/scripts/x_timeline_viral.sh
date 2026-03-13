@@ -97,13 +97,16 @@ for t in tweets:
         continue
     if t.get("score", 0) < MIN_SCORE:
         continue
-    # Skip very old tweets (> 6h) - want fresh content
+
+    # Hard rule from 大帅: only reply to tweets <=3h and views > 1000
+    if int(t.get("views", 0) or 0) <= 1000:
+        continue
     tweet_time = t.get("time", "")
     if tweet_time:
         try:
             dt = datetime.fromisoformat(tweet_time.replace("Z", "+00:00"))
             age_h = (datetime.now(timezone.utc) - dt).total_seconds() / 3600
-            if age_h > 6:
+            if age_h > 3:
                 continue
         except:
             pass

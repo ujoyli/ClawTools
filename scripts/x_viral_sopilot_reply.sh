@@ -21,25 +21,25 @@ flock -n 9 || exit 0
 # Small jitter
 python3 -c "import random,time;s=random.randint(0,30);print(f'jitter={s}s');time.sleep(s)"
 
-# 1) Refresh sopilot targets
-echo "Refreshing sopilot hot targets..."
-REFRESH_OUT=$(python3 scripts/sopilot_hot_tweets.py --top 10 --min-prob 50 --min-views 10000 2>&1 || true)
-echo "$REFRESH_OUT"
-
-# Avoid misleading 'No tweets found' when cached targets still exist
-if echo "$REFRESH_OUT" | grep -qi "No tweets found"; then
-  echo "[warn] refresh returned no new tweets; will try existing targets file"
-fi
-
 TARGETS_FILE="$WORKDIR/data/sopilot_hot_targets.json"
-if [[ ! -f "$TARGETS_FILE" ]]; then
-  echo "No sopilot targets available, falling back to old method"
-  # Fallback to old find_one_viral_tweet.py
-  exec bash scripts/x_viral_fast_reply_legacy.sh
-fi
+TARGET_URL=""
+TWEET_TEXT=""
+MAX_PICK_TRIES=4
 
-# 2) Pick first unreplied target
-read -r TARGET_URL TWEET_TEXT <<< "$(python3 - <<'PY'
+# 1) Refresh+pick with retries
+for pick_try in $(seq 1 $MAX_PICK_TRIES); do
+  echo "Refreshing sopilot hot targets... (try $pick_try/$MAX_PICK_TRIES)"
+  REFRESH_OUT=$(python3 scripts/sopilot_hot_tweets.py --top 10 --min-prob 50 --min-views 10000 2>&1 || true)
+  echo "$REFRESH_OUT"
+
+  if [[ ! -f "$TARGETS_FILE" ]]; then
+    echo "No sopilot targets available in this try"
+    sleep 5
+    continue
+  fi
+
+  # 2) Pick first unreplied qualified target
+  read -r TARGET_URL TWEET_TEXT <<< "$(python3 - <<'PY'
 import json, os, re, time
 
 targets = json.load(open("/root/.openclaw/workspace/data/sopilot_hot_targets.json"))
@@ -53,30 +53,75 @@ try:
 except:
     replied = {}
 
-blacklist = ["whyyoutouzhele", "teacherli1", "liteacher", "lixiansheng"]
+blacklist_path = "/root/.openclaw/workspace/data/blacklist.txt"
+try:
+    blacklist = [line.strip() for line in open(blacklist_path) if line.strip()]
+except:
+    blacklist = []
 
+# Political keywords to filter
+political = ['政治', '习近平', '共产党', '中共', '特朗普', '拜登', '美国大选', '两会', '中南海', '白宫', '普京', '俄罗斯', '乌克兰', '以色列', '哈马斯', '伊朗', '战争', '军队', '军方', '敏感', '封禁', '审查']
+# Tech keywords (priority)
+tech = ['AI', '人工智能', 'GPT', 'Claude', '编程', '代码', '软件', '开发', '技术', '科技', '互联网', '创业', '产品', '算法', '机器学习', '深度学习', '区块链', 'Web3', 'SaaS', 'API', 'GitHub', '开源']
+# Society keywords
+society = ['社会', '热点', '新闻', '八卦', '明星', '娱乐', '电影', '游戏', '体育', 'NBA', '足球', '篮球', '恋爱', '情感', '职场', '生活']
+
+def topic_score(txt):
+    tl = txt.lower()
+    if any(k in tl for k in political):
+        return -1000
+    if any(k in tl for k in tech):
+        return 100
+    if any(k in tl for k in society):
+        return 50
+    return 0
+
+best = None
 for t in targets.get("targets", []):
     tid = t.get("tweetId", "")
     url = (t.get("url", "") or "").lower()
     if any(b in url for b in blacklist):
         continue
+
+    # Hard rule: only reply to tweets within 2 hours
+    age_h = float(t.get("age_h", 999))
+    if age_h > 2:
+        continue
+
+    text = t.get("tweetText", "").replace("\n", " ").strip()
+    if any(p in text.lower() for p in political):
+        continue
     if tid and tid not in replied:
-        text = t.get("tweetText", "").replace("\n", " ").strip()[:280]
-        print(f"{t.get('url','')}\t{text}")
-        # Mark as replied
-        replied[tid] = now
-        with open(replied_path, "w") as f:
-            json.dump({"replied": replied}, f, ensure_ascii=False)
-            f.write("\n")
-        break
+        ts = topic_score(text)
+        if ts < 0:
+            continue
+        if best is None or ts > best[1]:
+            best = (t, ts, text[:280])
+
+if best:
+    t, _, text = best
+    print(f"{t.get('url','')}\t{text}")
+    replied[t.get('tweetId','')] = now
+    with open(replied_path, "w") as f:
+        json.dump({"replied": replied}, f, ensure_ascii=False)
+        f.write("\n")
 else:
     print("\t")
 PY
 )"
 
+  if [[ -n "$TARGET_URL" ]]; then
+    echo "Found qualified target on try $pick_try"
+    break
+  fi
+
+  echo "No qualified targets on try $pick_try, refreshing..."
+  sleep 5
+done
+
 if [[ -z "$TARGET_URL" ]]; then
-  echo "No unreplied targets available"
-  exit 0
+  echo "No unreplied qualified targets available after $MAX_PICK_TRIES tries"
+  exit 75
 fi
 
 export TARGET_URL TWEET_TEXT

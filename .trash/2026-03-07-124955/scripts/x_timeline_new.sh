@@ -95,8 +95,12 @@ for t in arr:
       except: pass
     if age_min>180: continue
 
+    # Hard rule from 大帅: only reply to tweets <=3h and views > 1000
+    views=t.get('views',0)
+    if views<=1000: continue
+
     # x-algorithm inspired score
-    views=t.get('views',0); likes=t.get('likes',0); rt=t.get('rt',0); replies=t.get('replies',0)
+    likes=t.get('likes',0); rt=t.get('rt',0); replies=t.get('replies',0)
     velocity=(views+1)/age_min
     engage=replies*8 + rt*5 + likes*2 + velocity*0.8
     score=engage

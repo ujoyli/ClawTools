@@ -468,7 +468,7 @@ title = os.environ.get('HUPU_TITLE', '')
 # Extract keywords for tags
 kws = re.findall(r'[\u4e00-\u9fff]{2,4}', title)[:3]
 if not kws:
-    kws = ['热点', '虎扑']
+    kws = ['热点']
 tags = ' '.join([f'#{k}' for k in kws[:3]])
 print(tags)
 TAGS_PY

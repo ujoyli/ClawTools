@@ -6,7 +6,7 @@ import random
 import subprocess
 from urllib.parse import quote
 
-CDP_PORT = 18802
+CDP_PORT = 44407
 BROWSER_URL = f"http://localhost:{CDP_PORT}"
 KEYWORDS = ["AI", "SaaS", "indie hacker", "crypto", "出海", "赚钱", "搞笑", "ship", "growth"]
 
